@@ -1,0 +1,30 @@
+[
+  {
+    "id": "youtube_watcher",
+    "label": "YouTube Watcher",
+    "status": "active",
+    "area": "source",
+    "summary": "Detection et telechargement des dernieres videos par niche."
+  },
+  {
+    "id": "clip_finder",
+    "label": "Clip Finder",
+    "status": "planned",
+    "area": "processing",
+    "summary": "Selection automatique des moments interessants dans les videos."
+  },
+  {
+    "id": "tiktok_formatter",
+    "label": "TikTok Formatter",
+    "status": "planned",
+    "area": "processing",
+    "summary": "Preparation des formats courts verticaux."
+  },
+  {
+    "id": "publisher",
+    "label": "Publisher",
+    "status": "active",
+    "area": "distribution",
+    "summary": "Publication TikTok via l'API officielle Content Posting."
+  }
+]
