@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TikTok Auto Project</title>
+    <link rel="stylesheet" href="/styles.css?v=clean-dashboard-6" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <p class="kicker">TikTok Auto Project</p>
+          <h1>Dashboard</h1>
+        </div>
+        <div class="top-actions">
+          <span id="lastRefresh">--</span>
+          <button id="refreshBtn" class="button ghost" type="button">Refresh</button>
+          <button id="stopBtn" class="button danger" type="button">Stop</button>
+        </div>
+      </header>
+
+      <section class="summary-grid">
+        <article class="stat-card active-card">
+          <span>Statut</span>
+          <strong id="autoState">Inactive</strong>
+          <label class="switch-row">
+            <input id="autoEnabled" type="checkbox" />
+            <span>Activer la boucle</span>
+          </label>
+        </article>
+        <article class="stat-card">
+          <span>Videos telechargees</span>
+          <strong id="statDownloaded">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>Videos publiees</span>
+          <strong id="statPublished">0</strong>
+        </article>
+        <article class="stat-card">
+          <span>Vues TikTok</span>
+          <strong id="statViews">0</strong>
+        </article>
+      </section>
+
+      <nav class="tabs" aria-label="Navigation dashboard">
+        <button class="tab active" type="button" data-tab="downloads">Pipeline</button>
+        <button class="tab" type="button" data-tab="youtube">Publier</button>
+        <button class="tab" type="button" data-tab="analytics">TikTok</button>
+        <button class="tab" type="button" data-tab="satisfying">Assets</button>
+        <button class="tab" type="button" data-tab="review">Review</button>
+      </nav>
+
+      <section id="downloads" class="tab-panel active">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">Pipeline</p>
+            <h2>Suivi des traitements</h2>
+          </div>
+          <div class="folder-actions">
+            <button class="button ghost folder-btn" type="button" data-folder="downloads">Dossier videos</button>
+            <button class="button ghost folder-btn" type="button" data-folder="satisfying">Dossier satisfying</button>
+            <button class="button ghost folder-btn" type="button" data-folder="project">Projet</button>
+            <button id="cleanupFailedBtn" class="button ghost" type="button">Nettoyer test echoue</button>
+            <span id="jobStatus" class="pill">idle</span>
+          </div>
+        </div>
+        <div id="activeJob" class="active-job hidden">
+          <div class="loader"></div>
+          <div>
+            <strong id="activeJobTitle">Telechargement en cours</strong>
+            <p id="activeJobLine">Preparation...</p>
+          </div>
+        </div>
+        <div id="downloadList" class="list"></div>
+        <pre id="logs" class="logs"></pre>
+      </section>
+
+      <section id="analytics" class="tab-panel">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">Compte autorise</p>
+            <h2>Connexion et analytique TikTok</h2>
+          </div>
+          <span id="tokenState" class="pill">Token non configure</span>
+        </div>
+        <div class="connect-panel">
+          <div>
+            <strong id="tiktokConnectionTitle">TikTok non connecte</strong>
+            <p id="tiktokConnectionDetails">Ajoute les cles API dans .env puis connecte le compte TikTok.</p>
+            <p class="review-note">
+              Direct Post utilise uniquement l'API officielle TikTok Content Posting. Les apps non auditees restent limitees par les regles de visibilite TikTok jusqu'a validation.
+            </p>
+          </div>
+          <div class="connect-actions">
+            <a id="connectTikTokBtn" class="button primary link-button" href="/api/tiktok/connect">Connecter TikTok</a>
+            <button id="disconnectTikTokBtn" class="button ghost" type="button">Deconnecter</button>
+          </div>
+        </div>
+        <div class="analytics-grid">
+          <article>
+            <span>Publiees</span>
+            <strong id="anaPublished">0</strong>
+          </article>
+          <article>
+            <span>Vues totales</span>
+            <strong id="anaViews">0</strong>
+          </article>
+          <article>
+            <span>Shorts crees</span>
+            <strong id="anaShorts">0</strong>
+          </article>
+          <article>
+            <span>Vues / video</span>
+            <strong id="anaAverage">0</strong>
+          </article>
+        </div>
+        <div id="publishedList" class="list compact"></div>
+      </section>
+
+      <section id="youtube" class="tab-panel">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">Publication controlee</p>
+            <h2>Preparer et publier une video</h2>
+          </div>
+        </div>
+        <form id="youtubeForm" class="link-form">
+          <label>
+            <span>Lien YouTube</span>
+            <input id="youtubeUrl" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          </label>
+          <div class="form-row">
+            <label>
+              <span>Niche</span>
+              <select id="manualNiche" required>
+                <option value="Divertissement / gaming">Divertissement / gaming</option>
+              </select>
+            </label>
+            <label>
+              <span>Nom de la source</span>
+              <input id="manualChannel" type="text" value="Lien manuel" />
+            </label>
+          </div>
+          <label class="switch-row form-switch">
+            <input id="testOneShort" type="checkbox" checked />
+            <span>Mode test : publier seulement le premier short</span>
+          </label>
+          <div class="form-row">
+            <label>
+              <span>Delai min entre posts</span>
+              <input id="delayMinMinutes" type="number" min="0" max="1440" step="1" value="10" />
+            </label>
+            <label>
+              <span>Delai max entre posts</span>
+              <input id="delayMaxMinutes" type="number" min="0" max="1440" step="1" value="20" />
+            </label>
+          </div>
+          <button class="button primary" type="submit">Lancer</button>
+        </form>
+      </section>
+
+      <section id="satisfying" class="tab-panel">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">Fond vertical</p>
+            <h2>Ajouter une video satisfying</h2>
+          </div>
+          <div class="folder-actions">
+            <button class="button ghost folder-btn" type="button" data-folder="satisfying">Ouvrir dossier</button>
+            <span id="satisfyingCount" class="pill">0 videos</span>
+          </div>
+        </div>
+        <form id="satisfyingForm" class="link-form">
+          <label>
+            <span>Lien YouTube satisfying</span>
+            <input id="satisfyingUrl" type="url" placeholder="https://www.youtube.com/watch?v=..." required />
+          </label>
+          <button class="button primary" type="submit">Ajouter au dossier</button>
+        </form>
+      </section>
+
+      <section id="review" class="tab-panel">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">TikTok App Review</p>
+            <h2>Texte explicatif a fournir</h2>
+          </div>
+          <span class="pill ok">API officielle</span>
+        </div>
+        <div class="review-layout">
+          <article class="review-block">
+            <h3>Usage description</h3>
+            <p>
+              TikTok Auto Project is a creator-owned web and desktop workflow used to prepare videos for the authorized TikTok account. The user signs in with TikTok Login Kit, selects or provides a video source, reviews the generated vertical short, chooses publishing options such as privacy and caption, and explicitly starts the export. The app then uses TikTok's official Content Posting API to publish the prepared video to the user's own TikTok profile.
+            </p>
+            <p>
+              The app requests <strong>user.info.basic</strong> to identify the authorized creator account, <strong>video.publish</strong> to directly publish videos after user action, <strong>video.upload</strong> as a draft fallback when direct posting is not available, and <strong>video.list</strong> to reconcile published content and reporting inside the dashboard.
+            </p>
+            <p>
+              No browser automation, scraping, credential sharing, or TikTok UI bypass is used. Tokens are stored locally on the user's machine, the creator can disconnect TikTok at any time, and the automatic runner is disabled by default until the user deliberately enables it.
+            </p>
+          </article>
+          <article class="review-block">
+            <h3>Demo video checklist</h3>
+            <ul class="clean-list">
+              <li>Show the official website with visible Terms and Privacy links.</li>
+              <li>Show TikTok Login Kit authorization and the requested scopes.</li>
+              <li>Show the dashboard connected to the authorized account.</li>
+              <li>Run one test short with SELF_ONLY privacy.</li>
+              <li>Show the generated vertical video and Direct Post API result.</li>
+              <li>Show the disconnect control and local cleanup controls.</li>
+            </ul>
+          </article>
+          <article class="review-block">
+            <h3>Scope justification</h3>
+            <ul class="clean-list">
+              <li><strong>user.info.basic</strong>: display the authorized creator account in the dashboard.</li>
+              <li><strong>video.publish</strong>: publish user-approved videos through Direct Post API.</li>
+              <li><strong>video.upload</strong>: upload as a draft fallback when direct publishing is unavailable.</li>
+              <li><strong>video.list</strong>: verify published items and support reporting for the creator.</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js?v=clean-dashboard-6" defer></script>
+  </body>
+</html>

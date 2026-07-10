@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>App Review Details - TikTok Auto Project</title>
+    <style>
+      body {
+        margin: 0;
+        background: #090b0f;
+        color: #eef3f7;
+        font-family: Inter, Arial, sans-serif;
+      }
+
+      main {
+        width: min(900px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 34px 0;
+      }
+
+      a {
+        color: #20c7a5;
+      }
+
+      section {
+        margin-top: 18px;
+        padding: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        background: #12161d;
+      }
+
+      h1,
+      h2 {
+        margin: 0 0 12px;
+      }
+
+      p,
+      li {
+        color: #9ba6b4;
+        line-height: 1.6;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        color: #eef3f7;
+        background: #090b0f;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 14px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/">Back to official website</a></p>
+      <h1>App Review Details</h1>
+
+      <section>
+        <h2>Usage description</h2>
+        <pre>TikTok Auto Project is a creator-owned web and desktop workflow used to prepare videos for the authorized TikTok account. The user signs in with TikTok Login Kit, selects or provides a video source, reviews the generated vertical short, chooses publishing options such as privacy and caption, and explicitly starts the export. The app then uses TikTok's official Content Posting API to publish the prepared video to the user's own TikTok profile.
+
+The app requests user.info.basic to identify the authorized creator account, video.publish to directly publish videos after user action, video.upload as a draft fallback when direct posting is not available, and video.list to reconcile published content and reporting inside the dashboard.
+
+No browser automation, scraping, credential sharing, or TikTok UI bypass is used. Tokens are stored locally on the user's machine, the creator can disconnect TikTok at any time, and the automatic runner is disabled by default until the user deliberately enables it.</pre>
+      </section>
+
+      <section>
+        <h2>Demo video checklist</h2>
+        <ul>
+          <li>Show this official website with visible Terms and Privacy links.</li>
+          <li>Show TikTok Login Kit authorization and the requested scopes.</li>
+          <li>Show the local dashboard connected to the authorized account.</li>
+          <li>Run one SELF_ONLY test short through the Content Posting API.</li>
+          <li>Show processing status, publishing status, disconnect, and cleanup controls.</li>
+        </ul>
+      </section>
+    </main>
+  </body>
+</html>

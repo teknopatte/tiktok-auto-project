@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+
+# Local config
+.env
+.env.*
+!.env.example
+.state/
+downloads/
+assets/satisfying/*
+!assets/satisfying/README.md
+videos_satisfaisantes/*
+!videos_satisfaisantes/README.md
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
