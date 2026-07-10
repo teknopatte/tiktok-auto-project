@@ -57,6 +57,8 @@ WEB_ROOT = PROJECT_ROOT / "web"
 FEATURES_FILE = PROJECT_ROOT / "data" / "features.json"
 JOB_STATE_FILE = PROJECT_ROOT / ".state" / "control_app_job.json"
 LOOP_STATE_FILE = PROJECT_ROOT / ".state" / "control_app_loop.json"
+ANALYSIS_OUTPUT_FILE = PROJECT_ROOT / ".state" / "candidate_analysis" / "latest.json"
+ANALYSIS_CACHE_DIR = PROJECT_ROOT / ".cache" / "candidate_analysis"
 SCRIPT_FILE = PROJECT_ROOT / "src" / "youtube_recent_downloader.py"
 VIDEO_SUFFIXES = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
 
@@ -277,6 +279,7 @@ def summarize_dashboard() -> dict[str, Any]:
         "niches": sorted(stats_by_niche.values(), key=lambda item: item["niche"]),
         "features": load_features(),
         "job": job,
+        "candidate_analysis": analysis_summary(),
         "automation": get_loop_state(),
     }
 
@@ -291,6 +294,134 @@ def safe_int(value: Any, default: int, minimum: int | None = None, maximum: int 
     if maximum is not None:
         parsed = min(maximum, parsed)
     return parsed
+
+
+def safe_float(
+    value: Any,
+    default: float,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if minimum is not None:
+        parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
+
+
+def parse_analysis_durations(value: Any) -> tuple[float, ...]:
+    raw_items = value if isinstance(value, list) else str(value or "").split(",")
+    try:
+        durations = tuple(float(str(item).strip()) for item in raw_items if str(item).strip())
+    except ValueError as exc:
+        raise ValueError("Les durees doivent etre des nombres separes par des virgules.") from exc
+    if not durations:
+        raise ValueError("Indique au moins une duree candidate.")
+    if len(durations) > 10 or any(duration < 1 or duration > 600 for duration in durations):
+        raise ValueError("Chaque duree doit etre comprise entre 1 et 600 secondes (10 maximum).")
+    return durations
+
+
+def build_analysis_command(payload: dict[str, Any]) -> list[str]:
+    raw_path = str(payload.get("videoPath") or "").strip()
+    if not raw_path:
+        raise ValueError("Choisis une video locale a analyser.")
+    video_path = Path(raw_path).expanduser()
+    if not video_path.is_absolute():
+        video_path = PROJECT_ROOT / video_path
+    video_path = video_path.resolve()
+    if not video_path.is_file():
+        raise ValueError(f"Video introuvable: {video_path}")
+    if video_path.suffix.lower() not in VIDEO_SUFFIXES:
+        raise ValueError("Format video non pris en charge.")
+
+    durations = parse_analysis_durations(payload.get("durations") or "60,75,90,105,120")
+    step = safe_float(payload.get("step"), 3.0, minimum=0.1, maximum=600.0)
+    silence_threshold = safe_float(
+        payload.get("silenceThresholdDb"),
+        -35.0,
+        minimum=-100.0,
+        maximum=0.0,
+    )
+    model = str(payload.get("model") or "tiny").strip()
+    if not model or len(model) > 200:
+        raise ValueError("Modele de transcription invalide.")
+    device = str(payload.get("device") or "cpu").strip().lower()
+    if device not in {"auto", "cpu", "cuda"}:
+        raise ValueError("Device invalide: auto, cpu ou cuda attendu.")
+    compute_type = str(payload.get("computeType") or "int8").strip().lower()
+    allowed_compute_types = {"default", "auto", "int8", "int8_float16", "int8_float32", "float16", "float32"}
+    if compute_type not in allowed_compute_types:
+        raise ValueError("Type de calcul invalide.")
+
+    return [
+        sys.executable,
+        "-m",
+        "src.candidate_analysis",
+        "analyze",
+        str(video_path),
+        "--step",
+        f"{step:g}",
+        "--durations",
+        ",".join(f"{duration:g}" for duration in durations),
+        "--silence-threshold-db",
+        f"{silence_threshold:g}",
+        "--model",
+        model,
+        "--language",
+        str(payload.get("language") or "fr").strip() or "fr",
+        "--device",
+        device,
+        "--compute-type",
+        compute_type,
+        "--cache-dir",
+        str(ANALYSIS_CACHE_DIR),
+        "--output",
+        str(ANALYSIS_OUTPUT_FILE),
+    ]
+
+
+def analysis_summary() -> dict[str, Any]:
+    payload = read_json_file(ANALYSIS_OUTPUT_FILE, None)
+    if not isinstance(payload, dict):
+        return {"available": False, "candidate_count": 0}
+    candidates = payload.get("candidates")
+    return {
+        "available": isinstance(candidates, list),
+        "source_video": payload.get("source_video"),
+        "analysis_version": payload.get("analysis_version"),
+        "candidate_count": len(candidates) if isinstance(candidates, list) else 0,
+        "config": payload.get("config", {}),
+        "global_analysis": payload.get("global_analysis", {}),
+        "updated_at": datetime.fromtimestamp(ANALYSIS_OUTPUT_FILE.stat().st_mtime, tz=UTC).isoformat(),
+    }
+
+
+def load_analysis_page(offset: int = 0, limit: int = 100) -> dict[str, Any]:
+    payload = read_json_file(ANALYSIS_OUTPUT_FILE, None)
+    if not isinstance(payload, dict) or not isinstance(payload.get("candidates"), list):
+        return {"ok": False, "error": "Aucune analyse disponible."}
+    candidates = payload["candidates"]
+    safe_offset = max(0, offset)
+    safe_limit = max(1, min(200, limit))
+    return {
+        "ok": True,
+        "source_video": payload.get("source_video"),
+        "analysis_version": payload.get("analysis_version"),
+        "config": payload.get("config", {}),
+        "global_analysis": payload.get("global_analysis", {}),
+        "candidates": candidates[safe_offset:safe_offset + safe_limit],
+        "pagination": {
+            "offset": safe_offset,
+            "limit": safe_limit,
+            "total": len(candidates),
+            "has_more": safe_offset + safe_limit < len(candidates),
+        },
+    }
 
 
 def build_download_command(payload: dict[str, Any]) -> list[str]:
@@ -557,6 +688,22 @@ def start_satisfying_job(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "job_id": job_id}
 
 
+def start_analysis_job(payload: dict[str, Any]) -> dict[str, Any]:
+    with JOB_LOCK:
+        if CURRENT_JOB.get("status") in {"running", "stopping"}:
+            return {"ok": False, "error": "Un job est deja en cours."}
+
+    try:
+        command = build_analysis_command(payload)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+    job_id = str(time.time_ns())
+    thread = threading.Thread(target=run_job, args=(command, job_id, "analysis"), daemon=True)
+    thread.start()
+    return {"ok": True, "job_id": job_id}
+
+
 def stop_job() -> dict[str, Any]:
     global CURRENT_PROCESS
     with JOB_LOCK:
@@ -739,6 +886,14 @@ class ControlAppHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/tiktok/status":
             self.send_json(tiktok_public_status())
             return
+        if parsed.path == "/api/analysis/latest":
+            query = urllib.parse.parse_qs(parsed.query)
+            offset = safe_int(query.get("offset", [0])[0], 0, minimum=0)
+            limit = safe_int(query.get("limit", [100])[0], 100, minimum=1, maximum=200)
+            result = load_analysis_page(offset, limit)
+            status = HTTPStatus.OK if result.get("ok") else HTTPStatus.NOT_FOUND
+            self.send_json(result, status)
+            return
         if parsed.path == "/api/tiktok/connect":
             try:
                 self.redirect_to(build_authorization_url())
@@ -791,6 +946,9 @@ class ControlAppHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/satisfying-jobs":
                 self.send_json(start_satisfying_job(self.read_payload()))
+                return
+            if parsed.path == "/api/analysis-jobs":
+                self.send_json(start_analysis_job(self.read_payload()))
                 return
             if parsed.path == "/api/jobs/stop":
                 self.send_json(stop_job())

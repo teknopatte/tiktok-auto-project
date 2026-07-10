@@ -14,6 +14,13 @@
     "summary": "Selection automatique des moments interessants dans les videos."
   },
   {
+    "id": "candidate_analysis",
+    "label": "Candidate Analysis",
+    "status": "active",
+    "area": "processing",
+    "summary": "Mesure locale de six metriques objectives sur des fenetres candidates virtuelles."
+  },
+  {
     "id": "tiktok_formatter",
     "label": "TikTok Formatter",
     "status": "planned",

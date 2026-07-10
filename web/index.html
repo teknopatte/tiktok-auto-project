@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>TikTok Auto Project</title>
-    <link rel="stylesheet" href="/styles.css?v=clean-dashboard-6" />
+    <link rel="stylesheet" href="/styles.css?v=dashboard-analysis-1" />
   </head>
   <body>
     <main class="app">
@@ -45,6 +45,7 @@
 
       <nav class="tabs" aria-label="Navigation dashboard">
         <button class="tab active" type="button" data-tab="downloads">Pipeline</button>
+        <button class="tab" type="button" data-tab="analysis">Analyser</button>
         <button class="tab" type="button" data-tab="youtube">Publier</button>
         <button class="tab" type="button" data-tab="analytics">TikTok</button>
         <button class="tab" type="button" data-tab="satisfying">Assets</button>
@@ -74,6 +75,113 @@
         </div>
         <div id="downloadList" class="list"></div>
         <pre id="logs" class="logs"></pre>
+      </section>
+
+      <section id="analysis" class="tab-panel">
+        <div class="panel-head">
+          <div>
+            <p class="kicker">Moteur local objectif</p>
+            <h2>Analyser les passages candidats</h2>
+          </div>
+          <span id="analysisStatus" class="pill">Aucune analyse</span>
+        </div>
+
+        <div class="analysis-layout">
+          <form id="analysisForm" class="link-form analysis-form">
+            <label>
+              <span>Video telechargee</span>
+              <select id="analysisVideoSelect">
+                <option value="">Choisir une video connue</option>
+              </select>
+            </label>
+            <label>
+              <span>Ou chemin local</span>
+              <input id="analysisVideoPath" type="text" placeholder="C:\Videos\video.mp4" />
+            </label>
+            <div class="form-row three-columns">
+              <label>
+                <span>Durees (secondes)</span>
+                <input id="analysisDurations" type="text" value="60,75,90,105,120" />
+              </label>
+              <label>
+                <span>Pas (secondes)</span>
+                <input id="analysisStep" type="number" min="0.1" max="600" step="0.1" value="3" />
+              </label>
+              <label>
+                <span>Seuil silence (dB)</span>
+                <input id="analysisSilenceThreshold" type="number" min="-100" max="0" step="1" value="-35" />
+              </label>
+            </div>
+            <div class="form-row three-columns">
+              <label>
+                <span>Modele local</span>
+                <select id="analysisModel">
+                  <option value="tiny">tiny — rapide</option>
+                  <option value="small">small — plus precis</option>
+                  <option value="medium">medium — plus lourd</option>
+                </select>
+              </label>
+              <label>
+                <span>Materiel</span>
+                <select id="analysisDevice">
+                  <option value="cpu">CPU</option>
+                  <option value="auto">Auto</option>
+                  <option value="cuda">NVIDIA CUDA</option>
+                </select>
+              </label>
+              <label>
+                <span>Precision calcul</span>
+                <select id="analysisComputeType">
+                  <option value="int8">int8 — CPU recommande</option>
+                  <option value="float16">float16 — GPU</option>
+                  <option value="default">Par defaut</option>
+                </select>
+              </label>
+            </div>
+            <div class="analysis-actions">
+              <button id="analysisSubmit" class="button primary" type="submit">Lancer l'analyse locale</button>
+              <p>Aucun clip n'est cree et aucune publication TikTok n'est declenchee.</p>
+            </div>
+            <p id="analysisError" class="form-error hidden" role="alert"></p>
+          </form>
+
+          <aside class="analysis-summary">
+            <p class="kicker">Dernier resultat</p>
+            <strong id="analysisSource">Aucune video analysee</strong>
+            <div class="analysis-meta-grid">
+              <div><span>Candidats</span><strong id="analysisCandidateCount">0</strong></div>
+              <div><span>Duree source</span><strong id="analysisSourceDuration">--</strong></div>
+              <div><span>Transcription</span><strong id="analysisEngine">--</strong></div>
+              <div><span>Cache global</span><strong id="analysisCacheHit">--</strong></div>
+            </div>
+          </aside>
+        </div>
+
+        <div class="analysis-results-head">
+          <div>
+            <p class="kicker">Mesures brutes</p>
+            <h3>Candidats calcules</h3>
+          </div>
+          <span id="analysisResultNotice" class="muted-note">Les 100 premiers candidats sont affiches.</span>
+        </div>
+        <div class="analysis-table-wrap">
+          <table class="analysis-table">
+            <thead>
+              <tr>
+                <th>Passage</th>
+                <th>Silence</th>
+                <th>Silence max</th>
+                <th>Parole</th>
+                <th>Mots/min</th>
+                <th>Hesitations</th>
+                <th>Latence</th>
+              </tr>
+            </thead>
+            <tbody id="analysisCandidateRows">
+              <tr><td colspan="7" class="empty-cell">Lance une analyse pour afficher les mesures.</td></tr>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <section id="analytics" class="tab-panel">
@@ -225,6 +333,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=clean-dashboard-6" defer></script>
+    <script src="/app.js?v=dashboard-analysis-1" defer></script>
   </body>
 </html>

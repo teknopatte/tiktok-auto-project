@@ -63,6 +63,17 @@ Puis ouvre `http://127.0.0.1:8787`.
 
 Le panneau `Auto runner` permet d'activer/desactiver une boucle automatique. Elle reutilise les reglages visibles dans le formulaire: mode `Test` pour surveiller sans telecharger, ou mode `Download` pour telecharger les nouvelles videos a chaque passage.
 
+L'onglet `Analyser` donne acces au moteur objectif directement depuis le dashboard :
+
+- choix d'une video deja telechargee ou saisie d'un chemin local ;
+- configuration des durees, du pas, du seuil de silence, du modele et du materiel ;
+- lancement comme job local exclusif, sans publication TikTok ;
+- suivi dans le panneau Pipeline et bouton global d'arret ;
+- affichage des six mesures brutes pour les 100 premiers candidats ;
+- resultat complet conserve dans `.state/candidate_analysis/latest.json` et cache global dans `.cache/candidate_analysis/`.
+
+Demarre le dashboard avec `python -m src.control_app`, ouvre `http://127.0.0.1:8787`, puis selectionne `Analyser`. L'installation de `requirements-analysis.txt` reste requise pour Faster-Whisper.
+
 Les futures fonctionnalites sont listees dans `data/features.json`; l'interface les charge automatiquement depuis ce registre.
 
 ## Publication TikTok
