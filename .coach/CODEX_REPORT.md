@@ -878,8 +878,17 @@ en `1.986 s`; `python -m compileall src` et `git diff --check` ont réussi.
 
 ### Publication GitHub
 
-**PROBLÈME NON RÉSOLU** — La publication est bloquée avant commit : le dépôt local
-n'a aucun remote Git configuré (`git remote -v` vide) et GitHub CLI `gh` n'est pas
-installé. Conformément au workflow de publication, aucun remote n'a été inventé,
-aucun commit partiel n'a été créé et aucun push n'a été tenté. Le fichier runtime
-`coach_system/state.json` ne devra pas être inclus dans le futur commit.
+**FAIT VÉRIFIÉ** — GitHub CLI a ensuite été installé et authentifié sur le compte
+`teknopatte`. Le remote placeholder a été remplacé par le dépôt confirmé
+`https://github.com/teknopatte/tiktok-auto-project.git`. Les historiques local et
+distant étaient indépendants ; ils ont été fusionnés sans réécriture ni force-push.
+
+La branche `agent/local-video-analysis-site` a été poussée, puis la pull request
+`#1` a été fusionnée dans `main` avec le commit `2b059a5`. Les pages racine GitHub
+Pages et leurs copies sous `public/` ont été synchronisées. Le déploiement GitHub
+Pages `29124312671` a réussi et `https://tiktok.aemour.com/` répond HTTP `200` avec
+la nouvelle section d'analyse objective.
+
+**SÉCURITÉ VÉRIFIÉE** — `.env` n'est pas suivi et reste ignoré. `.state/`,
+`.cache/`, `downloads/` et les modèles locaux n'ont pas été publiés. La mutation
+runtime locale de `coach_system/state.json` n'a pas été ajoutée aux commits.
