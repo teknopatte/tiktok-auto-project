@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TikTok Callback</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #0b0d10;
+        color: #eef3f7;
+        font-family: Arial, sans-serif;
+      }
+      main {
+        max-width: 720px;
+      }
+      a {
+        color: #20c7a5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>TikTok connection</h1>
+      <p>Redirecting to the local TikTok Auto Project dashboard...</p>
+      <p>
+        If nothing happens,
+        <a id="manualLink" href="http://127.0.0.1:8787/tiktok/callback">continue locally</a>.
+      </p>
+    </main>
+    <script>
+      const target = new URL("http://127.0.0.1:8787/tiktok/callback");
+      target.search = window.location.search;
+      document.querySelector("#manualLink").href = target.toString();
+      window.location.replace(target.toString());
+    </script>
+  </body>
+</html>
