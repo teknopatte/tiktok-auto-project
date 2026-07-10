@@ -16,6 +16,11 @@ processus `codex exec` distincts. Il ne remplace ni ne modifie le pipeline TikTo
 - sorties structurées validées par les schémas JSON ;
 - valeurs ressemblant à des secrets masquées dans les journaux.
 
+Sous Windows, `START_COACH.bat` active la page de codes UTF-8 et définit
+`PYTHONUTF8=1` ainsi que `PYTHONIOENCODING=utf-8`. Le superviseur impose en plus
+`encoding="utf-8"` et `errors="replace"` à toutes ses captures subprocess, puis
+normalise les éventuels `stdout`/`stderr` absents avant de les journaliser.
+
 Le mode réel exige par défaut un arbre Git propre, hormis `coach_system/state.json`
 qui est l'état de reprise géré par le superviseur. Cette exigence est suspendue
 uniquement pour reprendre une `active_mission` interrompue, dont les changements

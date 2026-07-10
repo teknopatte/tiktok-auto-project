@@ -228,3 +228,65 @@ interdiction explicite de lancer la boucle réelle pendant cette mission.
 
 Question bloquante : aucune pour le dry-run. Une validation explicite de Tim reste
 nécessaire avant le premier cycle réel autonome.
+
+---
+
+## Correctif Windows encodage subprocess — 2026-07-10
+
+### Résumé
+
+**FAIT VÉRIFIÉ** — Le premier appel réel du Coach échouait lors du décodage de la
+sortie de `codex exec` avec l'encodage Windows courant, puis la journalisation
+concaténait directement `stdout` et `stderr` sans accepter `None`.
+
+Correction ciblée :
+
+- toutes les captures subprocess du superviseur imposent maintenant
+  `encoding="utf-8"` et `errors="replace"` ;
+- `normalize_process_output` transforme systématiquement les flux absents en
+  chaînes vides avant toute lecture, concaténation ou journalisation ;
+- la concaténation fautive utilise désormais `stdout_text` et `stderr_text` ;
+- `START_COACH.bat` active la page de codes 65001, `PYTHONUTF8=1` et
+  `PYTHONIOENCODING=utf-8` ;
+- aucun changement n'a été apporté au pipeline TikTok ou aux métriques vidéo.
+
+### Fichiers modifiés
+
+- `coach_system/supervisor.py` ;
+- `tests/test_coach_supervisor.py` ;
+- `START_COACH.bat` ;
+- `coach_system/README.md` ;
+- `.coach/CODEX_REPORT.md`.
+
+### Tests ajoutés
+
+Neuf tests mockés, sans appel Codex réel, couvrent :
+
+- octets UTF-8 contenant une séquence impossible à décoder en cp1252 ;
+- français accentué ;
+- tiret long ;
+- flèche Unicode ;
+- emoji ;
+- `stdout=None` et `stderr=None` ;
+- stdout valide avec `stderr=None` ;
+- `stdout=None` avec stderr valide ;
+- wrapper générique `run_checked` en UTF-8/remplacement et normalisation de `None`.
+
+### Résultats exacts
+
+- baseline avant correctif : 41 tests réussis en 0,672 s ;
+- tests ciblés après correctif : 21 tests réussis en 0,116 s ;
+- suite complète finale : 50 tests réussis en 0,487 s, exit code 0 ;
+- `python -m compileall coach_system` : exit code 0 ;
+- `git diff --check` : exit code 0 ;
+- `START_COACH.bat --dry-run --max-cycles 1` : exit code 0 ;
+- aucun cycle Codex réel, push Git ou publication TikTok exécuté.
+
+### Limites
+
+**LIMITATION** — `errors="replace"` conserve la continuité d'exécution mais remplace
+par `�` un octet réellement invalide en UTF-8. Les sorties UTF-8 valides, y compris
+accents, tiret long, flèche et emoji, sont préservées exactement. Le chemin réel
+`codex exec` n'a pas été relancé conformément à l'interdiction de cette mission ;
+la régression est reproduite avec un runner Codex mocké qui vérifie les paramètres
+de décodage transmis par le superviseur.

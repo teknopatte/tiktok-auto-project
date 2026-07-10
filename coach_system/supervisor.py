@@ -103,6 +103,17 @@ def safe_write_text(path: Path, value: str) -> None:
     path.write_text(redact_text(value), encoding="utf-8")
 
 
+def normalize_process_output(
+    result: subprocess.CompletedProcess[str],
+) -> tuple[str, str]:
+    """Return safe text streams and normalize mocked/missing subprocess output."""
+    stdout_text = result.stdout or ""
+    stderr_text = result.stderr or ""
+    result.stdout = stdout_text
+    result.stderr = stderr_text
+    return stdout_text, stderr_text
+
+
 def run_checked(
     argv: Sequence[str],
     *,
@@ -112,12 +123,20 @@ def run_checked(
 ) -> subprocess.CompletedProcess[str]:
     try:
         result = runner(
-            list(argv), cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+            list(argv),
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
         )
     except subprocess.TimeoutExpired as exc:
         raise AgentExecutionError(f"Command timed out after {timeout}s: {argv[0]}") from exc
     except OSError as exc:
         raise AgentExecutionError(f"Cannot execute {argv[0]}: {exc}") from exc
+    normalize_process_output(result)
     return result
 
 
@@ -338,6 +357,8 @@ class Supervisor:
                 input=prompt,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=int(self.config["agent_timeout_seconds"]),
                 check=False,
             )
@@ -346,7 +367,11 @@ class Supervisor:
         except OSError as exc:
             raise AgentExecutionError(f"Cannot launch {role}: {exc}") from exc
         duration = time.monotonic() - started
-        safe_write_text(output_path.with_suffix(".events.txt"), result.stdout + "\n" + result.stderr)
+        stdout_text, stderr_text = normalize_process_output(result)
+        safe_write_text(
+            output_path.with_suffix(".events.txt"),
+            stdout_text + "\n" + stderr_text,
+        )
         if result.returncode != 0:
             raise AgentExecutionError(f"{role} failed with exit code {result.returncode} after {duration:.2f}s")
         if not output_path.is_file():

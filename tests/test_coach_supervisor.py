@@ -14,6 +14,7 @@ from coach_system.supervisor import (
     Supervisor,
     ValidationError,
     parse_agent_json,
+    run_checked,
     verify_preconditions,
 )
 
@@ -64,6 +65,94 @@ def passed_tests():
 
 
 class CoachSupervisorTests(unittest.TestCase):
+    def assert_agent_streams_are_safe(self, stdout_bytes, stderr_bytes, expected_events):
+        captured = {}
+
+        def mocked_codex(argv, **kwargs):
+            captured.update(kwargs)
+            output_index = argv.index("--output-last-message") + 1
+            Path(argv[output_index]).write_text("agent continued", encoding="utf-8")
+
+            def decode(value):
+                if value is None:
+                    return None
+                return value.decode(kwargs["encoding"], errors=kwargs["errors"])
+
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=decode(stdout_bytes),
+                stderr=decode(stderr_bytes),
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_path = root / "agent_output.txt"
+            sup = Supervisor(root, config(), state(), root / "logs", runner=mocked_codex)
+            with patch("coach_system.supervisor.shutil.which", return_value="codex"):
+                result = sup._run_agent("coach", "prompt", output_path)
+            self.assertEqual(result, "agent continued")
+            self.assertEqual(
+                output_path.with_suffix(".events.txt").read_text(encoding="utf-8"),
+                expected_events,
+            )
+            self.assertEqual(captured["encoding"], "utf-8")
+            self.assertEqual(captured["errors"], "replace")
+            self.assertTrue(captured["text"])
+
+    def test_codex_utf8_bytes_not_decodable_as_cp1252(self):
+        text = "Réponse — coach → prêt 📝"
+        raw = text.encode("utf-8")
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("cp1252")
+        self.assert_agent_streams_are_safe(raw, b"", text + "\n")
+
+    def test_codex_french_accents_are_preserved(self):
+        text = "Réponse déjà prête"
+        self.assert_agent_streams_are_safe(text.encode("utf-8"), b"", text + "\n")
+
+    def test_codex_em_dash_is_preserved(self):
+        text = "phase — suivante"
+        self.assert_agent_streams_are_safe(text.encode("utf-8"), b"", text + "\n")
+
+    def test_codex_unicode_arrow_is_preserved(self):
+        text = "coach → engineer"
+        self.assert_agent_streams_are_safe(text.encode("utf-8"), b"", text + "\n")
+
+    def test_codex_emoji_is_preserved(self):
+        text = "succès 📝"
+        self.assert_agent_streams_are_safe(text.encode("utf-8"), b"", text + "\n")
+
+    def test_codex_stdout_and_stderr_none_are_empty(self):
+        self.assert_agent_streams_are_safe(None, None, "\n")
+
+    def test_codex_valid_stdout_and_stderr_none_continue(self):
+        self.assert_agent_streams_are_safe(b"stdout valid", None, "stdout valid\n")
+
+    def test_codex_stdout_none_and_valid_stderr_continue(self):
+        self.assert_agent_streams_are_safe(None, b"stderr valid", "\nstderr valid")
+
+    def test_run_checked_uses_utf8_replace_and_normalizes_none(self):
+        captured = {}
+
+        def mocked_command(argv, **kwargs):
+            captured.update(kwargs)
+            invalid_utf8 = b"before:\xff:after"
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                stdout=invalid_utf8.decode(kwargs["encoding"], errors=kwargs["errors"]),
+                stderr=None,
+            )
+
+        result = run_checked(
+            ["mock-command"], cwd=Path.cwd(), timeout=1, runner=mocked_command
+        )
+        self.assertEqual(result.stdout, "before:�:after")
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(captured["encoding"], "utf-8")
+        self.assertEqual(captured["errors"], "replace")
+
     def test_codex_absent(self):
         with patch("coach_system.supervisor.shutil.which", return_value=None):
             with self.assertRaises(PreconditionError):
