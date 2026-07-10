@@ -1,0 +1,10 @@
+{
+  "max_cycles": 5,
+  "max_retries_per_mission": 3,
+  "stop_on_test_failure": false,
+  "auto_commit": true,
+  "require_clean_git_start": true,
+  "sleep_between_cycles_seconds": 5,
+  "agent_timeout_seconds": 1800,
+  "test_timeout_seconds": 900
+}

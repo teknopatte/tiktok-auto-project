@@ -24,6 +24,10 @@ videos_satisfaisantes/*
 
 # Logs
 *.log
+coach_system/logs/*
+!coach_system/logs/.gitkeep
+coach_system/.supervisor.lock
+coach_system/STOP_REQUESTED
 
 # OS / editor
 .DS_Store

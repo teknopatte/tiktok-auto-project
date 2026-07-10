@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "first_real_cycle_completed": false,
+  "completed_missions": [],
+  "blocked_missions": [],
+  "active_mission": null,
+  "last_run": null,
+  "interrupted": false
+}
