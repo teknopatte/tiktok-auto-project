@@ -72,6 +72,18 @@ le Coach choisit une seule mission. L'Engineer travaille, les tests détectés s
 exécutés, puis Reviewer et éventuellement Scientist statuent. Un refus est renvoyé
 à l'Engineer dans la limite configurée.
 
+`tests.json` est explicitement étiqueté `SUPERVISOR_AUTHORITATIVE_TEST_RUN` et
+constitue l'unique résultat de test autoritaire pour l'acceptation. Un test lancé
+par l'Engineer reste un `ENGINEER_SELF_TEST_RUN` distinct : ses timings ne sont pas
+comparés à ceux du superviseur.
+
+Avant la mission puis avant chaque tentative, le superviseur enregistre le commit
+Git, le status et les empreintes SHA-256 des fichiers métier. Le Reviewer reçoit le
+diff métier cumulatif et le delta de la tentative. Seuls les chemins runtime
+explicites (`state.json`, logs, lock et signal d'arrêt) sont exclus ; toute vraie
+modification de code reste visible. Un rejet classé `SUPERVISOR_INFRASTRUCTURE` ou
+`EXTERNAL_BLOCKER` arrête la mission sans épuiser les retries Engineer.
+
 ## Arrêt
 
 Dans un autre terminal :
@@ -97,8 +109,10 @@ et durée. Si rien n'est configuré, l'absence est enregistrée explicitement.
 Chaque lancement crée `coach_system/logs/<horodatage>/cycle_NNN/`, puis un dossier
 `attempt_NN/` par tentative. Les artefacts comprennent `coach_output.json`,
 `engineer_output.txt`, `tests.json`, `reviewer_output.json`, l'éventuel
-`scientist_output.json`, `git_diff.patch` et `cycle_summary.json`. Cette structure
-évite d'écraser les sorties lors d'un lancement multi-cycle.
+`scientist_output.json`, `mission_baseline.json`, `baseline.json`,
+`post_engineer.json`, `git_diff.patch`, `attempt_diff.patch` et
+`cycle_summary.json`. Cette structure évite d'écraser les sorties lors d'un
+lancement multi-cycle.
 
 `state.json` conserve les missions terminées/bloquées et la mission active.
 Les journaux, le verrou et le signal d'arrêt sont ignorés par Git.

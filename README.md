@@ -93,3 +93,99 @@ TIKTOK_SCOPES=user.info.basic,video.upload,video.publish,video.list
 Par securite, la privacy par defaut est `SELF_ONLY` et `TIKTOK_AUTO_PUBLISH=0`. Les tokens OAuth sont stockes localement dans `.state/tiktok_token.json` et ne doivent jamais etre commits.
 
 Le mode manuel `Lien YouTube` utilise un pipeline optimise quand la publication TikTok est active: telechargement, puis pour chaque partie `clip -> rendu vertical -> publication`, au lieu d'attendre que tous les shorts soient generes. Le dashboard permet aussi de lancer un test sur un seul short, de regler le delai entre publications, et de nettoyer les fichiers d'un test echoue.
+
+## Analyse objective des passages candidats
+
+Le paquet `src.candidate_analysis` analyse une video locale sans creer physiquement les passages. Il execute une analyse globale unique, conserve les timelines, puis agrege les mesures sur toutes les fenetres demandees:
+
+```text
+video locale
+  -> FFprobe (duree et presence audio)
+  -> FFmpeg silencedetect (timeline des silences)
+  -> Faster-Whisper local + VAD (segments de parole et mots horodates)
+  -> cache global
+  -> fenetres virtuelles
+  -> six mesures brutes par fenetre
+```
+
+Il ne calcule aucun score, poids ou avis subjectif. Il n'est pas branche automatiquement sur la publication TikTok.
+
+### Installation
+
+FFmpeg et FFprobe doivent etre disponibles dans le `PATH`. Les dependances d'analyse sont separees du downloader pour ne pas alourdir son installation:
+
+```powershell
+python -m pip install -r requirements-analysis.txt
+```
+
+Faster-Whisper telecharge le modele open source demande lors de sa premiere utilisation si `--model` est un nom (`tiny`, `small`, etc.). Les utilisations suivantes sont locales. `--model` accepte aussi le chemin d'un modele deja present sur la machine. Aucune API IA payante et aucune cle ne sont utilisees.
+
+### Commande
+
+```powershell
+python -m src.candidate_analysis analyze "video.mp4" --step 3 --durations 60,75,90,105,120 --output analysis.json
+```
+
+Options principales:
+
+- `--silence-threshold-db -35` et `--minimum-silence-duration 0.25` configurent `silencedetect`;
+- `--model small --language fr --device auto --compute-type default` configurent Faster-Whisper;
+- `--hesitations euh,heu,hum,hmm,bah,ben` configure la liste explicite;
+- `--cache-dir .cache/candidate_analysis` choisit le cache, et `--no-cache` le desactive.
+
+Les valeurs par defaut des fenetres sont 60, 75, 90, 105 et 120 secondes avec un pas de 3 secondes.
+
+### Definitions des six mesures
+
+| Mesure | Definition et formule | Unite / plage |
+|---|---|---|
+| `silence_ratio` | Somme des intersections entre la fenetre et les intervalles `silencedetect`, divisee par la duree de la fenetre. | ratio `[0, 1]` |
+| `longest_silence_seconds` | Duree de la plus longue intersection silencieuse continue dans la fenetre. Les intervalles qui se chevauchent sont fusionnes. | secondes `[0, duree]` |
+| `speech_density` | Duree de l'union des segments de parole Faster-Whisper/VAD intersectant la fenetre, divisee par sa duree. Elle est calculee independamment de `silence_ratio`. | ratio `[0, 1]` |
+| `words_per_minute` | Nombre de tokens dont le mot horodate commence dans la fenetre, divise par la duree de parole intersectee, multiplie par 60. Zero si aucune parole active. | mots/minute `>= 0` |
+| `hesitation_ratio` | Nombre d'occurrences des mots ou expressions explicitement configures, divise par le nombre total de tokens de la fenetre. | ratio `[0, 1]` |
+| `startup_latency_seconds` | Temps entre le debut de la fenetre et le premier segment de parole qui l'intersecte. Zero si la parole est deja active; duree de la fenetre si aucune parole n'est detectee. | secondes `[0, duree]` |
+
+Les frontieres de mots suivent la convention semi-ouverte `[debut, fin)`: un mot exactement au debut est inclus, un mot exactement a la fin est exclu. Les valeurs restent numeriques dans tous les cas.
+
+### Cache et sortie
+
+Le cache global se trouve par defaut dans `.cache/candidate_analysis/` et n'est pas versionne. Sa cle SHA-256 depend de la version d'analyse, du chemin absolu, de la taille et du `mtime` de la source, ainsi que des reglages FFmpeg/transcription. Les durees de fenetre, le pas et la liste d'hesitations n'invalident pas la transcription: ils sont agreges a nouveau a faible cout.
+
+Extrait de sortie:
+
+```json
+{
+  "source_video": "video.mp4",
+  "analysis_version": "1.0",
+  "config": {
+    "window_durations_seconds": [60.0, 75.0, 90.0],
+    "step_seconds": 3.0,
+    "silence_threshold_db": -35.0
+  },
+  "candidates": [
+    {
+      "candidate_id": "clip_0001",
+      "start_seconds": 0.0,
+      "end_seconds": 60.0,
+      "duration_seconds": 60.0,
+      "metrics": {
+        "silence_ratio": 0.08,
+        "longest_silence_seconds": 1.42,
+        "speech_density": 0.72,
+        "words_per_minute": 164.3,
+        "hesitation_ratio": 0.031,
+        "startup_latency_seconds": 0.38
+      }
+    }
+  ]
+}
+```
+
+### Limites connues
+
+- La qualite de `speech_density`, des mots et des hesitations depend du modele, de la langue, du bruit et de la qualite audio.
+- Les segments Faster-Whisper sont une estimation de la parole; ce n'est pas une annotation humaine au niveau phoneme.
+- `silencedetect` mesure un niveau audio, pas la parole: musique et bruit peuvent donc expliquer qu'une zone ne soit pas silencieuse sans etre parlee.
+- Le cache utilise chemin, taille et `mtime`, pas le hash integral du fichier, afin d'eviter une lecture supplementaire couteuse des longues videos.
+- Le premier lancement d'un modele nomme necessite son telechargement; la vitesse et l'espace disque dependent du modele et du materiel.

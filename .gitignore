@@ -16,6 +16,7 @@ build/
 .env.*
 !.env.example
 .state/
+.cache/
 downloads/
 assets/satisfying/*
 !assets/satisfying/README.md

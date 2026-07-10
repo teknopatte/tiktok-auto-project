@@ -7,6 +7,8 @@ uses only the Python standard library so it does not alter the TikTok runtime.
 from __future__ import annotations
 
 import argparse
+import difflib
+import hashlib
 import json
 import logging
 import os
@@ -31,6 +33,17 @@ STOP_PATH = PACKAGE_DIR / "STOP_REQUESTED"
 SCHEMA_DIR = PACKAGE_DIR / "schemas"
 PROMPT_DIR = PACKAGE_DIR / "prompts"
 LOGS_DIR = PACKAGE_DIR / "logs"
+
+# Explicit, minimal supervisor-owned runtime paths. Business/code files must never
+# be added here merely to make a review pass.
+RUNTIME_EXACT_PATHS = frozenset(
+    {
+        "coach_system/state.json",
+        "coach_system/.supervisor.lock",
+        "coach_system/STOP_REQUESTED",
+    }
+)
+RUNTIME_PATH_PREFIXES = ("coach_system/logs/",)
 
 LOGGER = logging.getLogger("coach_supervisor")
 ProcessRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -60,6 +73,16 @@ class AlreadyRunningError(SupervisorError):
 class TestCommand:
     name: str
     argv: list[str]
+
+
+@dataclass(frozen=True)
+class GitBaseline:
+    label: str
+    captured_at: str
+    head: str
+    files: dict[str, bytes]
+    preexisting_business_status: list[str]
+    runtime_status: list[str]
 
 
 def utc_now() -> str:
@@ -103,6 +126,72 @@ def safe_write_text(path: Path, value: str) -> None:
     path.write_text(redact_text(value), encoding="utf-8")
 
 
+def normalize_repo_path(value: str) -> str:
+    path = value.replace("\\", "/")
+    return path[2:] if path.startswith("./") else path
+
+
+def is_runtime_path(value: str) -> bool:
+    path = normalize_repo_path(value)
+    return path in RUNTIME_EXACT_PATHS or any(
+        path.startswith(prefix) for prefix in RUNTIME_PATH_PREFIXES
+    )
+
+
+def classify_status_lines(lines: Sequence[str]) -> tuple[list[str], list[str]]:
+    """Split porcelain status evidence into business and explicit runtime paths."""
+    business: list[str] = []
+    runtime: list[str] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        raw_path = line[3:] if len(line) >= 4 else line
+        paths = [part.strip().strip('"') for part in raw_path.split(" -> ")]
+        target = runtime if paths and all(is_runtime_path(path) for path in paths) else business
+        target.append(line)
+    return business, runtime
+
+
+def diff_workspace_snapshots(
+    before: dict[str, bytes], after: dict[str, bytes]
+) -> tuple[str, list[str]]:
+    """Create a reviewable business diff between two exact workspace snapshots."""
+    before_business = {
+        normalize_repo_path(path): content
+        for path, content in before.items()
+        if not is_runtime_path(path)
+    }
+    after_business = {
+        normalize_repo_path(path): content
+        for path, content in after.items()
+        if not is_runtime_path(path)
+    }
+    changed_paths = sorted(
+        path
+        for path in set(before_business) | set(after_business)
+        if before_business.get(path) != after_business.get(path)
+    )
+    chunks: list[str] = []
+    for path in changed_paths:
+        old_bytes = before_business.get(path)
+        new_bytes = after_business.get(path)
+        try:
+            old_text = "" if old_bytes is None else old_bytes.decode("utf-8")
+            new_text = "" if new_bytes is None else new_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            chunks.append(f"Binary files a/{path} and b/{path} differ\n")
+            continue
+        chunks.extend(
+            difflib.unified_diff(
+                old_text.splitlines(keepends=True),
+                new_text.splitlines(keepends=True),
+                fromfile="/dev/null" if old_bytes is None else f"a/{path}",
+                tofile="/dev/null" if new_bytes is None else f"b/{path}",
+            )
+        )
+    return "".join(chunks), changed_paths
+
+
 def normalize_process_output(
     result: subprocess.CompletedProcess[str],
 ) -> tuple[str, str]:
@@ -140,6 +229,72 @@ def run_checked(
     return result
 
 
+def capture_git_baseline(
+    repo_root: Path,
+    label: str,
+    *,
+    runner: ProcessRunner = subprocess.run,
+) -> GitBaseline:
+    """Capture verifiable Git/workspace evidence without mutating the repository."""
+    head_result = run_checked(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root, timeout=30, runner=runner
+    )
+    paths_result = run_checked(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=repo_root,
+        timeout=30,
+        runner=runner,
+    )
+    status_result = run_checked(
+        ["git", "status", "--porcelain"], cwd=repo_root, timeout=30, runner=runner
+    )
+    if any(result.returncode != 0 for result in (head_result, paths_result, status_result)):
+        raise SupervisorError("Unable to capture the Git baseline")
+
+    files: dict[str, bytes] = {}
+    for raw_path in paths_result.stdout.split("\0"):
+        if not raw_path:
+            continue
+        path = normalize_repo_path(raw_path)
+        if is_runtime_path(path):
+            continue
+        absolute = repo_root / Path(path)
+        if absolute.is_file():
+            files[path] = absolute.read_bytes()
+    business_status, runtime_status = classify_status_lines(
+        status_result.stdout.splitlines()
+    )
+    return GitBaseline(
+        label=label,
+        captured_at=utc_now(),
+        head=head_result.stdout.strip(),
+        files=files,
+        preexisting_business_status=business_status,
+        runtime_status=runtime_status,
+    )
+
+
+def write_baseline_evidence(path: Path, baseline: GitBaseline) -> None:
+    write_json(
+        path,
+        {
+            "label": baseline.label,
+            "captured_at": baseline.captured_at,
+            "git_head": baseline.head,
+            "preexisting_business_status": baseline.preexisting_business_status,
+            "runtime_status": baseline.runtime_status,
+            "runtime_exclusions": {
+                "exact_paths": sorted(RUNTIME_EXACT_PATHS),
+                "path_prefixes": list(RUNTIME_PATH_PREFIXES),
+            },
+            "business_file_sha256": {
+                name: hashlib.sha256(content).hexdigest()
+                for name, content in sorted(baseline.files.items())
+            },
+        },
+    )
+
+
 def verify_preconditions(
     repo_root: Path,
     config: dict[str, Any],
@@ -167,11 +322,10 @@ def verify_preconditions(
         status = run_checked([git, "status", "--porcelain"], cwd=repo_root, timeout=30, runner=runner)
         if status.returncode != 0:
             raise PreconditionError("Unable to inspect Git working tree")
-        dirty_lines = [
-            line for line in status.stdout.splitlines()
-            if not line.rstrip().replace("\\", "/").endswith("coach_system/state.json")
-        ]
-        if dirty_lines:
+        business_status, _runtime_status = classify_status_lines(
+            status.stdout.splitlines()
+        )
+        if business_status:
             raise PreconditionError("Git working tree must be clean before a real run")
 
 
@@ -239,6 +393,13 @@ def validate_agent_payload(payload: Any, schema_name: str) -> dict[str, Any]:
                 raise ValidationError(f"{schema_name}.{key} must contain strings")
             if item_rules.get("minLength") and any(not item for item in value):
                 raise ValidationError(f"{schema_name}.{key} contains an empty item")
+    if schema_name == "review.schema.json":
+        verdict = payload["verdict"]
+        classification = payload["issue_classification"]
+        if verdict == "ACCEPT" and classification != "NONE":
+            raise ValidationError("An ACCEPT review must use issue_classification NONE")
+        if verdict != "ACCEPT" and classification == "NONE":
+            raise ValidationError("A non-ACCEPT review must classify its issues")
     return payload
 
 
@@ -427,8 +588,11 @@ class Supervisor:
     def run_tests(self, cycle_dir: Path) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         commands = detect_test_commands(self.repo_root)
+        run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
         if self.dry_run:
             payload = {
+                "source": "SUPERVISOR_AUTHORITATIVE_TEST_RUN",
+                "run_id": run_id,
                 "status": "simulated",
                 "all_passed": True,
                 "justification": "Dry-run does not execute repository commands.",
@@ -456,6 +620,8 @@ class Supervisor:
                 }
             )
         payload = {
+            "source": "SUPERVISOR_AUTHORITATIVE_TEST_RUN",
+            "run_id": run_id,
             "status": "completed" if commands else "not_configured",
             "all_passed": bool(commands) and all(item["exit_code"] == 0 for item in results),
             "justification": "" if commands else "No supported, genuinely configured test command was detected.",
@@ -464,21 +630,47 @@ class Supervisor:
         write_json(cycle_dir / "tests.json", payload)
         return payload
 
-    def capture_diff(self, cycle_dir: Path) -> str:
-        if self.dry_run:
-            diff = "# dry-run: no workspace changes\n"
+    def capture_baseline(self, path: Path, label: str) -> GitBaseline:
+        if self.dry_run and not (self.repo_root / ".git").exists():
+            baseline = GitBaseline(label, utc_now(), "DRY_RUN_NO_GIT_FIXTURE", {}, [], [])
         else:
-            result = run_checked(
-                ["git", "diff", "--no-ext-diff", "--binary", "--", ".", ":(exclude)coach_system/state.json"],
-                cwd=self.repo_root,
-                timeout=60,
-                runner=self.runner,
+            baseline = capture_git_baseline(
+                self.repo_root, label, runner=self.runner
             )
-            if result.returncode != 0:
-                raise SupervisorError("Unable to capture Git diff")
-            diff = result.stdout
-        safe_write_text(cycle_dir / "git_diff.patch", diff)
-        return redact_text(diff)
+        write_baseline_evidence(path, baseline)
+        return baseline
+
+    def build_review_evidence(
+        self,
+        mission_baseline: GitBaseline,
+        attempt_baseline: GitBaseline,
+        current: GitBaseline,
+        attempt_dir: Path,
+    ) -> dict[str, Any]:
+        mission_diff, mission_paths = diff_workspace_snapshots(
+            mission_baseline.files, current.files
+        )
+        attempt_diff, attempt_paths = diff_workspace_snapshots(
+            attempt_baseline.files, current.files
+        )
+        safe_write_text(attempt_dir / "git_diff.patch", mission_diff)
+        safe_write_text(attempt_dir / "attempt_diff.patch", attempt_diff)
+        return {
+            "mission_baseline_artifact": str(attempt_dir.parent / "mission_baseline.json"),
+            "attempt_baseline_artifact": str(attempt_dir / "baseline.json"),
+            "post_engineer_artifact": str(attempt_dir / "post_engineer.json"),
+            "cumulative_business_changed_paths": mission_paths,
+            "attempt_business_changed_paths": attempt_paths,
+            "cumulative_business_diff": redact_text(mission_diff),
+            "attempt_business_diff": redact_text(attempt_diff),
+            "preexisting_before_mission": mission_baseline.preexisting_business_status,
+            "preexisting_before_attempt": attempt_baseline.preexisting_business_status,
+            "runtime_mutations_excluded": current.runtime_status,
+            "runtime_exclusion_policy": {
+                "exact_paths": sorted(RUNTIME_EXACT_PATHS),
+                "path_prefixes": list(RUNTIME_PATH_PREFIXES),
+            },
+        }
 
     def commit(self, mission: dict[str, Any]) -> None:
         if self.dry_run or not self.config.get("auto_commit", True):
@@ -503,12 +695,19 @@ class Supervisor:
         final_tests: dict[str, Any] = {}
         final_review: dict[str, Any] = {}
         final_science: dict[str, Any] | None = None
+        final_issue_classification: str | None = None
+        mission_baseline = self.capture_baseline(
+            cycle_dir / "mission_baseline.json", "MISSION_START"
+        )
 
         for attempt in range(1, maximum + 1):
             if self.stop_requested():
                 return {"status": "INTERRUPTED", "attempts": attempt - 1}
             attempt_dir = cycle_dir / f"attempt_{attempt:02d}"
             attempt_dir.mkdir(parents=True, exist_ok=True)
+            attempt_baseline = self.capture_baseline(
+                attempt_dir / "baseline.json", f"ATTEMPT_{attempt:02d}_START"
+            )
             if self.dry_run:
                 engineering = "DRY-RUN: Engineer invocation simulated; no files modified."
                 safe_write_text(attempt_dir / "engineer_output.txt", engineering)
@@ -521,24 +720,52 @@ class Supervisor:
                 )
 
             final_tests = self.run_tests(attempt_dir)
-            diff = self.capture_diff(attempt_dir)
+            current = self.capture_baseline(
+                attempt_dir / "post_engineer.json", f"ATTEMPT_{attempt:02d}_POST_TESTS"
+            )
+            git_evidence = self.build_review_evidence(
+                mission_baseline, attempt_baseline, current, attempt_dir
+            )
             if self.config.get("stop_on_test_failure") and not final_tests["all_passed"]:
                 objections = ["Configured test command failed and stop_on_test_failure is enabled."]
                 continue
 
             if self.dry_run:
-                final_review = {"verdict": "ACCEPT", "summary": "Dry-run reviewer simulation.", "issues": []}
+                final_review = {
+                    "verdict": "ACCEPT",
+                    "issue_classification": "NONE",
+                    "summary": "Dry-run reviewer simulation.",
+                    "issues": [],
+                }
                 write_json(attempt_dir / "reviewer_output.json", final_review)
             else:
                 reviewer_prompt = (PROMPT_DIR / "reviewer.md").read_text(encoding="utf-8") + self._context(
-                    mission=mission, engineering_report=engineering, tests=final_tests, git_diff=diff
+                    mission=mission,
+                    engineer_self_report={
+                        "source": "ENGINEER_SELF_TEST_RUN",
+                        "report": engineering,
+                    },
+                    authoritative_tests={
+                        "source": "SUPERVISOR_AUTHORITATIVE_TEST_RUN",
+                        "artifact": str(attempt_dir / "tests.json"),
+                        "results": final_tests,
+                    },
+                    git_evidence=git_evidence,
                 )
                 final_review = self._agent_json(
                     "reviewer", reviewer_prompt, attempt_dir / "reviewer_output.json", "review.schema.json"
                 )
 
             if final_review["verdict"] != "ACCEPT":
-                if final_review["verdict"] == "BLOCKED":
+                final_issue_classification = final_review.get(
+                    "issue_classification", "ENGINEER_FIXABLE"
+                )
+                if (
+                    final_review["verdict"] == "BLOCKED"
+                    or final_issue_classification
+                    in {"SUPERVISOR_INFRASTRUCTURE", "EXTERNAL_BLOCKER"}
+                ):
+                    objections = list(final_review["issues"]) or [final_review["summary"]]
                     break
                 objections = list(final_review["issues"]) or [final_review["summary"]]
                 continue
@@ -549,7 +776,10 @@ class Supervisor:
                     write_json(attempt_dir / "scientist_output.json", final_science)
                 else:
                     scientist_prompt = (PROMPT_DIR / "scientist.md").read_text(encoding="utf-8") + self._context(
-                        mission=mission, engineering_report=engineering, tests=final_tests, git_diff=diff
+                        mission=mission,
+                        engineer_self_report=engineering,
+                        authoritative_tests=final_tests,
+                        git_evidence=git_evidence,
                     )
                     final_science = self._agent_json(
                         "scientist", scientist_prompt, attempt_dir / "scientist_output.json", "scientist.schema.json"
@@ -580,6 +810,7 @@ class Supervisor:
             "status": "BLOCKED",
             "attempts": min(maximum, attempt),
             "scientist_required": scientist_required,
+            "issue_classification": final_issue_classification,
             "reason": objections or final_review.get("issues") or ["Agent returned BLOCKED."],
         }
 

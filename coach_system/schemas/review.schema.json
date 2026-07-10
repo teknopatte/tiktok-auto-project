@@ -2,9 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "summary", "issues"],
+  "required": ["verdict", "issue_classification", "summary", "issues"],
   "properties": {
     "verdict": {"type": "string", "enum": ["ACCEPT", "REJECT", "BLOCKED"]},
+    "issue_classification": {"type": "string", "enum": ["NONE", "ENGINEER_FIXABLE", "SUPERVISOR_INFRASTRUCTURE", "EXTERNAL_BLOCKER"]},
     "summary": {"type": "string"},
     "issues": {"type": "array", "items": {"type": "string"}}
   }

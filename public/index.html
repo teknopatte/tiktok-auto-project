@@ -6,7 +6,7 @@
     <title>TikTok Auto Project</title>
     <meta
       name="description"
-      content="Creator-owned workflow for preparing and publishing TikTok videos through official TikTok APIs."
+      content="Local-first video analysis, preparation, and creator-controlled TikTok publishing through official APIs."
     />
     <style>
       :root {
@@ -17,6 +17,7 @@
         --muted: #9ba6b4;
         --line: rgba(255, 255, 255, 0.1);
         --accent: #20c7a5;
+        --accent-soft: rgba(32, 199, 165, 0.12);
       }
 
       * {
@@ -65,6 +66,11 @@
         font-size: 24px;
       }
 
+      h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+
       p {
         margin: 0;
         color: var(--muted);
@@ -76,6 +82,20 @@
         max-width: 760px;
         margin-top: 18px;
         font-size: 18px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        margin-bottom: 18px;
+        border: 1px solid rgba(32, 199, 165, 0.35);
+        border-radius: 999px;
+        padding: 7px 11px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
 
       .grid {
@@ -104,6 +124,41 @@
         line-height: 1.6;
       }
 
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .metric {
+        border-left: 2px solid var(--accent);
+        padding: 10px 12px;
+        background: var(--soft);
+      }
+
+      .metric code {
+        color: var(--ink);
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .metric p {
+        margin-top: 5px;
+        font-size: 14px;
+      }
+
+      .workflow {
+        margin: 18px 0 0;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 16px;
+        background: var(--panel);
+        color: var(--ink);
+        font: 600 14px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+      }
+
       footer {
         padding: 24px 0 10px;
         color: var(--muted);
@@ -111,7 +166,8 @@
       }
 
       @media (max-width: 760px) {
-        .grid {
+        .grid,
+        .metric-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -120,9 +176,10 @@
   <body>
     <main>
       <header>
+        <span class="eyebrow">Local-first video intelligence</span>
         <h1>TikTok Auto Project</h1>
         <p class="lead">
-          A creator-owned workflow for preparing, reviewing, and publishing short-form videos to an authorized TikTok account through TikTok's official Login Kit and Content Posting API.
+          A creator-owned workflow that analyzes long videos locally, measures candidate passages objectively, prepares short-form videos, and publishes only with explicit consent through TikTok's official APIs.
         </p>
         <nav aria-label="Legal links">
           <a href="/terms.html">Terms of Service</a>
@@ -135,18 +192,52 @@
         <h2>What the service does</h2>
         <div class="grid">
           <article class="card">
+            <strong>Analyze locally</strong>
+            <p>A long video is analyzed once on the creator's machine. Candidate windows are measured without generating hundreds of temporary clips.</p>
+          </article>
+          <article class="card">
             <strong>Prepare videos</strong>
-            <p>The creator provides a video source, and the local dashboard prepares vertical short-form clips for review.</p>
+            <p>The local dashboard downloads approved sources and prepares vertical short-form clips for creator review.</p>
           </article>
           <article class="card">
             <strong>Publish with consent</strong>
-            <p>The creator connects their own TikTok account and explicitly starts each export workflow from the dashboard.</p>
-          </article>
-          <article class="card">
-            <strong>Track results</strong>
-            <p>The dashboard records processing status, publishing status, and basic reporting for the authorized creator account.</p>
+            <p>The creator connects their own account and explicitly starts exports through TikTok's official Content Posting API.</p>
           </article>
         </div>
+      </section>
+
+      <section>
+        <h2>Objective candidate analysis</h2>
+        <p>
+          The first analysis engine produces raw, explainable measurements only. It does not ask an AI for a “viral score,” invent weighting, or send video content to a paid AI API.
+        </p>
+        <div class="metric-grid">
+          <article class="metric">
+            <code>silence_ratio</code>
+            <p>Share of the candidate duration classified as silence.</p>
+          </article>
+          <article class="metric">
+            <code>longest_silence_seconds</code>
+            <p>Longest continuous silent interval inside the candidate.</p>
+          </article>
+          <article class="metric">
+            <code>speech_density</code>
+            <p>Share of the candidate covered by locally detected speech.</p>
+          </article>
+          <article class="metric">
+            <code>words_per_minute</code>
+            <p>Transcribed words divided by actual active speech time.</p>
+          </article>
+          <article class="metric">
+            <code>hesitation_ratio</code>
+            <p>Configured hesitation expressions divided by analyzed words.</p>
+          </article>
+          <article class="metric">
+            <code>startup_latency_seconds</code>
+            <p>Time from the candidate start to its first detected speech.</p>
+          </article>
+        </div>
+        <pre class="workflow" aria-label="Local analysis workflow">LONG VIDEO → ONE GLOBAL ANALYSIS → CACHED TIMELINES → VIRTUAL WINDOWS → RAW METRICS</pre>
       </section>
 
       <section>
@@ -164,6 +255,8 @@
         <h2>User control and safety</h2>
         <ul class="list">
           <li>The automatic runner is disabled by default.</li>
+          <li>Video analysis runs locally with FFmpeg and an optional local Faster-Whisper model.</li>
+          <li>No subjective viral score is generated.</li>
           <li>The creator can disconnect TikTok authorization at any time.</li>
           <li>No TikTok passwords are collected or stored by this service.</li>
           <li>No browser automation or TikTok UI bypass is used.</li>

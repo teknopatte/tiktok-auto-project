@@ -9,10 +9,14 @@ from coach_system import supervisor as module
 from coach_system.supervisor import (
     AgentExecutionError,
     AlreadyRunningError,
+    GitBaseline,
     InstanceLock,
     PreconditionError,
     Supervisor,
     ValidationError,
+    capture_git_baseline,
+    classify_status_lines,
+    diff_workspace_snapshots,
     parse_agent_json,
     run_checked,
     verify_preconditions,
@@ -61,7 +65,37 @@ def mission(scientist=False):
 
 
 def passed_tests():
-    return {"status": "completed", "all_passed": True, "justification": "", "results": []}
+    return {
+        "source": "SUPERVISOR_AUTHORITATIVE_TEST_RUN",
+        "run_id": "test-run",
+        "status": "completed",
+        "all_passed": True,
+        "justification": "",
+        "results": [],
+    }
+
+
+def baseline(label="TEST_BASELINE", files=None, business_status=None, runtime_status=None):
+    return GitBaseline(
+        label=label,
+        captured_at="2026-07-10T00:00:00+00:00",
+        head="abc123",
+        files=files or {},
+        preexisting_business_status=business_status or [],
+        runtime_status=runtime_status or [],
+    )
+
+
+def mock_git_evidence(supervisor):
+    supervisor.capture_baseline = Mock(
+        side_effect=lambda path, label: baseline(label=label)
+    )
+    supervisor.build_review_evidence = Mock(
+        return_value={
+            "cumulative_business_changed_paths": [],
+            "attempt_business_changed_paths": [],
+        }
+    )
 
 
 class CoachSupervisorTests(unittest.TestCase):
@@ -196,14 +230,14 @@ class CoachSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             sup = Supervisor(root, config(), state(), root / "run")
+            mock_git_evidence(sup)
             sup._agent_text = Mock(return_value="engineered")
             reviews = iter([
-                {"verdict": "REJECT", "summary": "bug", "issues": ["fix bug"]},
-                {"verdict": "ACCEPT", "summary": "ok", "issues": []},
+                {"verdict": "REJECT", "issue_classification": "ENGINEER_FIXABLE", "summary": "bug", "issues": ["fix bug"]},
+                {"verdict": "ACCEPT", "issue_classification": "NONE", "summary": "ok", "issues": []},
             ])
             sup._agent_json = Mock(side_effect=lambda role, *args: next(reviews))
             sup.run_tests = Mock(return_value=passed_tests())
-            sup.capture_diff = Mock(return_value="diff")
             result = sup.execute_mission(mission(), root / "cycle")
             self.assertEqual(result["status"], "ACCEPTED")
             self.assertEqual(result["attempts"], 2)
@@ -213,13 +247,14 @@ class CoachSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             sup = Supervisor(root, config(), state(), root / "run")
+            mock_git_evidence(sup)
             sup._agent_text = Mock(return_value="engineered")
             science_count = 0
 
             def json_agent(role, *args):
                 nonlocal science_count
                 if role == "reviewer":
-                    return {"verdict": "ACCEPT", "summary": "ok", "issues": []}
+                    return {"verdict": "ACCEPT", "issue_classification": "NONE", "summary": "ok", "issues": []}
                 science_count += 1
                 if science_count == 1:
                     return {"verdict": "INSUFFICIENT_EVIDENCE", "summary": "weak", "issues": ["add evidence"]}
@@ -227,7 +262,6 @@ class CoachSupervisorTests(unittest.TestCase):
 
             sup._agent_json = Mock(side_effect=json_agent)
             sup.run_tests = Mock(return_value=passed_tests())
-            sup.capture_diff = Mock(return_value="diff")
             result = sup.execute_mission(mission(scientist=True), root / "cycle")
             self.assertEqual(result["status"], "ACCEPTED")
             self.assertEqual(result["attempts"], 2)
@@ -236,14 +270,194 @@ class CoachSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             sup = Supervisor(root, config(max_retries_per_mission=3), state(), root / "run")
+            mock_git_evidence(sup)
             sup._agent_text = Mock(return_value="engineered")
-            sup._agent_json = Mock(return_value={"verdict": "REJECT", "summary": "bad", "issues": ["still bad"]})
+            sup._agent_json = Mock(return_value={"verdict": "REJECT", "issue_classification": "ENGINEER_FIXABLE", "summary": "bad", "issues": ["still bad"]})
             sup.run_tests = Mock(return_value=passed_tests())
-            sup.capture_diff = Mock(return_value="diff")
             result = sup.execute_mission(mission(), root / "cycle")
             self.assertEqual(result["status"], "BLOCKED")
             self.assertEqual(result["attempts"], 3)
             self.assertEqual(sup._agent_text.call_count, 3)
+
+    def test_distinct_engineer_and_authoritative_test_timings_are_accepted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sup = Supervisor(root, config(), state(), root / "run")
+            mock_git_evidence(sup)
+            sup._agent_text = Mock(
+                return_value="ENGINEER_SELF_TEST_RUN: Ran in 0.631 s"
+            )
+            authoritative = passed_tests()
+            authoritative["results"] = [{"duration_seconds": 0.764}]
+            sup.run_tests = Mock(return_value=authoritative)
+            reviewer_prompts = []
+
+            def reviewer(role, prompt, *args):
+                reviewer_prompts.append(prompt)
+                return {
+                    "verdict": "ACCEPT",
+                    "issue_classification": "NONE",
+                    "summary": "Distinct runs are correctly attributed.",
+                    "issues": [],
+                }
+
+            sup._agent_json = Mock(side_effect=reviewer)
+            result = sup.execute_mission(mission(), root / "cycle")
+            self.assertEqual(result["status"], "ACCEPTED")
+            self.assertEqual(result["attempts"], 1)
+            self.assertIn("ENGINEER_SELF_TEST_RUN", reviewer_prompts[0])
+            self.assertIn("0.631", reviewer_prompts[0])
+            self.assertIn("SUPERVISOR_AUTHORITATIVE_TEST_RUN", reviewer_prompts[0])
+            self.assertIn("0.764", reviewer_prompts[0])
+            self.assertIn("tests.json", reviewer_prompts[0])
+
+    def test_runtime_state_change_is_excluded_from_business_diff(self):
+        patch_text, changed = diff_workspace_snapshots(
+            {
+                "src/app.py": b"unchanged\n",
+                "coach_system/state.json": b'{"active_mission": null}\n',
+            },
+            {
+                "src/app.py": b"unchanged\n",
+                "coach_system/state.json": b'{"active_mission": {"id": "M-001"}}\n',
+            },
+        )
+        self.assertEqual(changed, [])
+        self.assertEqual(patch_text, "")
+
+    def test_real_out_of_scope_engineer_change_remains_visible(self):
+        patch_text, changed = diff_workspace_snapshots(
+            {".coach/CODEX_REPORT.md": b"audit\n", "src/unrelated.py": b"safe\n"},
+            {".coach/CODEX_REPORT.md": b"audit updated\n", "src/unrelated.py": b"unsafe\n"},
+        )
+        self.assertEqual(
+            changed, [".coach/CODEX_REPORT.md", "src/unrelated.py"]
+        )
+        self.assertIn("a/src/unrelated.py", patch_text)
+        self.assertIn("+unsafe", patch_text)
+
+    def test_preexisting_business_and_runtime_changes_are_distinguished(self):
+        business, runtime = classify_status_lines(
+            [
+                " M .coach/CODEX_REPORT.md",
+                " M coach_system/state.json",
+                "?? coach_system/logs/run/tests.json",
+            ]
+        )
+        self.assertEqual(business, [" M .coach/CODEX_REPORT.md"])
+        self.assertEqual(
+            runtime,
+            [
+                " M coach_system/state.json",
+                "?? coach_system/logs/run/tests.json",
+            ],
+        )
+
+    def test_git_baseline_records_hashes_and_excludes_runtime_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".coach").mkdir()
+            (root / "coach_system").mkdir()
+            (root / ".coach" / "CODEX_REPORT.md").write_text(
+                "audit\n", encoding="utf-8"
+            )
+            (root / "coach_system" / "state.json").write_text(
+                "{}\n", encoding="utf-8"
+            )
+
+            def mocked_git(argv, **kwargs):
+                if argv[1:3] == ["rev-parse", "HEAD"]:
+                    return subprocess.CompletedProcess(argv, 0, "abc123\n", "")
+                if argv[1:3] == ["ls-files", "-z"]:
+                    return subprocess.CompletedProcess(
+                        argv,
+                        0,
+                        ".coach/CODEX_REPORT.md\0coach_system/state.json\0",
+                        "",
+                    )
+                if argv[1:3] == ["status", "--porcelain"]:
+                    return subprocess.CompletedProcess(
+                        argv,
+                        0,
+                        " M .coach/CODEX_REPORT.md\n M coach_system/state.json\n",
+                        "",
+                    )
+                self.fail(f"Unexpected command: {argv}")
+
+            captured = capture_git_baseline(root, "ATTEMPT_START", runner=mocked_git)
+            self.assertEqual(captured.head, "abc123")
+            self.assertEqual(
+                list(captured.files), [".coach/CODEX_REPORT.md"]
+            )
+            self.assertEqual(
+                captured.preexisting_business_status,
+                [" M .coach/CODEX_REPORT.md"],
+            )
+            self.assertEqual(
+                captured.runtime_status, [" M coach_system/state.json"]
+            )
+
+    def test_supervisor_infrastructure_issue_does_not_consume_retries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sup = Supervisor(
+                root, config(max_retries_per_mission=3), state(), root / "run"
+            )
+            mock_git_evidence(sup)
+            sup._agent_text = Mock(return_value="engineered")
+            sup.run_tests = Mock(return_value=passed_tests())
+            sup._agent_json = Mock(
+                return_value={
+                    "verdict": "REJECT",
+                    "issue_classification": "SUPERVISOR_INFRASTRUCTURE",
+                    "summary": "Runtime artifact polluted review.",
+                    "issues": ["Fix the supervisor, not the mission."],
+                }
+            )
+            result = sup.execute_mission(mission(), root / "cycle")
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertEqual(result["attempts"], 1)
+            self.assertEqual(
+                result["issue_classification"], "SUPERVISOR_INFRASTRUCTURE"
+            )
+            self.assertEqual(sup._agent_text.call_count, 1)
+
+    def test_failed_authoritative_tests_still_block_acceptance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sup = Supervisor(
+                root, config(max_retries_per_mission=2), state(), root / "run"
+            )
+            mock_git_evidence(sup)
+            sup._agent_text = Mock(return_value="engineered")
+            failed = passed_tests()
+            failed["all_passed"] = False
+            failed["results"] = [{"exit_code": 1, "duration_seconds": 0.764}]
+            sup.run_tests = Mock(return_value=failed)
+            sup._agent_json = Mock(
+                return_value={
+                    "verdict": "ACCEPT",
+                    "issue_classification": "NONE",
+                    "summary": "Code review passed.",
+                    "issues": [],
+                }
+            )
+            result = sup.execute_mission(mission(), root / "cycle")
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertEqual(result["attempts"], 2)
+            self.assertEqual(sup._agent_text.call_count, 2)
+
+    def test_tests_json_declares_authoritative_supervisor_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cycle = root / "cycle"
+            sup = Supervisor(root, config(), state(), root / "run", dry_run=True)
+            result = sup.run_tests(cycle)
+            saved = json.loads((cycle / "tests.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                result["source"], "SUPERVISOR_AUTHORITATIVE_TEST_RUN"
+            )
+            self.assertEqual(saved["source"], result["source"])
 
     def test_max_cycles_is_respected_in_dry_run(self):
         with tempfile.TemporaryDirectory() as temporary:
