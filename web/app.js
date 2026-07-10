@@ -1,4 +1,5 @@
 let dashboard = null;
+let loadedAnalysisKey = null;
 const ACCOUNT_NICHE = "Divertissement / gaming";
 const ACCOUNT_ALLOWED_NICHES = ["Divertissement pur", "Gaming"];
 
@@ -61,12 +62,49 @@ const els = {
   satisfyingCount: document.querySelector("#satisfyingCount"),
   folderButtons: [...document.querySelectorAll(".folder-btn")],
   cleanupFailedBtn: document.querySelector("#cleanupFailedBtn"),
+  analysisForm: document.querySelector("#analysisForm"),
+  analysisVideoSelect: document.querySelector("#analysisVideoSelect"),
+  analysisVideoPath: document.querySelector("#analysisVideoPath"),
+  analysisDurations: document.querySelector("#analysisDurations"),
+  analysisStep: document.querySelector("#analysisStep"),
+  analysisSilenceThreshold: document.querySelector("#analysisSilenceThreshold"),
+  analysisModel: document.querySelector("#analysisModel"),
+  analysisDevice: document.querySelector("#analysisDevice"),
+  analysisComputeType: document.querySelector("#analysisComputeType"),
+  analysisSubmit: document.querySelector("#analysisSubmit"),
+  analysisError: document.querySelector("#analysisError"),
+  analysisStatus: document.querySelector("#analysisStatus"),
+  analysisSource: document.querySelector("#analysisSource"),
+  analysisCandidateCount: document.querySelector("#analysisCandidateCount"),
+  analysisSourceDuration: document.querySelector("#analysisSourceDuration"),
+  analysisEngine: document.querySelector("#analysisEngine"),
+  analysisCacheHit: document.querySelector("#analysisCacheHit"),
+  analysisResultNotice: document.querySelector("#analysisResultNotice"),
+  analysisCandidateRows: document.querySelector("#analysisCandidateRows"),
   tabs: [...document.querySelectorAll(".tab")],
   panels: [...document.querySelectorAll(".tab-panel")],
 };
 
 function safe(value, fallback = "--") {
   return value === null || value === undefined || value === "" ? fallback : value;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function decimal(value, digits = 2) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "--";
+  return new Intl.NumberFormat("fr-FR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(parsed);
 }
 
 function number(value) {
@@ -106,14 +144,97 @@ function renderTop(stats, automation) {
 function renderJob(job) {
   const status = job.status || "idle";
   const running = status === "running" || status === "stopping";
-  els.jobStatus.textContent = job.source === "satisfying" ? `${status} / satisfying` : status;
+  const sourceLabel = job.source === "satisfying" ? "satisfying" : job.source === "analysis" ? "analyse" : "";
+  els.jobStatus.textContent = sourceLabel ? `${status} / ${sourceLabel}` : status;
   els.jobStatus.className = `pill ${status}`;
   els.activeJob.classList.toggle("hidden", !running);
   els.activeJobTitle.textContent =
-    job.source === "satisfying" ? "Ajout satisfying en cours" : "Telechargement en cours";
+    job.source === "satisfying"
+      ? "Ajout satisfying en cours"
+      : job.source === "analysis"
+        ? "Analyse video locale en cours"
+        : "Telechargement en cours";
   els.activeJobLine.textContent = latestLog(job);
   els.logs.textContent = (job.logs || []).join("\n");
   els.logs.scrollTop = els.logs.scrollHeight;
+}
+
+function renderAnalysisVideoOptions(videos) {
+  const current = els.analysisVideoSelect.value;
+  const known = videos.filter((video) => video.downloaded_path);
+  els.analysisVideoSelect.innerHTML = [
+    '<option value="">Choisir une video connue</option>',
+    ...known.map(
+      (video) =>
+        `<option value="${escapeHtml(video.downloaded_path)}">${escapeHtml(
+          video.title || video.video_id || video.downloaded_path,
+        )}</option>`,
+    ),
+  ].join("");
+  if ([...els.analysisVideoSelect.options].some((option) => option.value === current)) {
+    els.analysisVideoSelect.value = current;
+  }
+}
+
+function renderAnalysisSummary(summary, job) {
+  const running = job?.source === "analysis" && ["running", "stopping"].includes(job.status);
+  els.analysisSubmit.disabled = running;
+  els.analysisStatus.textContent = running
+    ? "Analyse en cours"
+    : summary.available
+      ? `${number(summary.candidate_count)} candidats`
+      : "Aucune analyse";
+  els.analysisStatus.className = running ? "pill running" : summary.available ? "pill ok" : "pill";
+  els.analysisSource.textContent = summary.source_video || "Aucune video analysee";
+  els.analysisCandidateCount.textContent = number(summary.candidate_count || 0);
+  els.analysisSourceDuration.textContent = summary.global_analysis?.duration_seconds
+    ? `${decimal(summary.global_analysis.duration_seconds, 1)} s`
+    : "--";
+  els.analysisEngine.textContent = summary.global_analysis?.transcription_engine || "--";
+  els.analysisCacheHit.textContent = summary.global_analysis?.cache_hit === true
+    ? "Reutilise"
+    : summary.global_analysis?.cache_hit === false
+      ? "Nouveau"
+      : "--";
+}
+
+function renderAnalysisCandidates(result) {
+  const candidates = result.candidates || [];
+  els.analysisResultNotice.textContent = result.pagination?.has_more
+    ? `${number(candidates.length)} affiches sur ${number(result.pagination.total)} candidats.`
+    : `${number(result.pagination?.total || candidates.length)} candidats affiches.`;
+  if (!candidates.length) {
+    els.analysisCandidateRows.innerHTML = '<tr><td colspan="7" class="empty-cell">Aucun candidat pour ces durees.</td></tr>';
+    return;
+  }
+  els.analysisCandidateRows.innerHTML = candidates
+    .map((candidate) => {
+      const metrics = candidate.metrics || {};
+      return `
+        <tr>
+          <td><strong>${escapeHtml(candidate.candidate_id)}</strong><span>${decimal(candidate.start_seconds, 1)} → ${decimal(candidate.end_seconds, 1)} s</span></td>
+          <td>${decimal(Number(metrics.silence_ratio) * 100, 1)} %</td>
+          <td>${decimal(metrics.longest_silence_seconds, 2)} s</td>
+          <td>${decimal(Number(metrics.speech_density) * 100, 1)} %</td>
+          <td>${decimal(metrics.words_per_minute, 1)}</td>
+          <td>${decimal(Number(metrics.hesitation_ratio) * 100, 1)} %</td>
+          <td>${decimal(metrics.startup_latency_seconds, 2)} s</td>
+        </tr>`;
+    })
+    .join("");
+}
+
+async function refreshAnalysisResult(summary) {
+  if (!summary.available) return;
+  const key = `${summary.source_video}|${summary.updated_at}|${summary.candidate_count}`;
+  if (key === loadedAnalysisKey) return;
+  const response = await fetch("/api/analysis/latest?offset=0&limit=100");
+  if (!response.ok) return;
+  const result = await response.json();
+  if (result.ok) {
+    loadedAnalysisKey = key;
+    renderAnalysisCandidates(result);
+  }
 }
 
 function renderDownloads(videos) {
@@ -216,12 +337,16 @@ function render(data) {
   renderDownloads(data.videos || []);
   renderAnalytics(data.stats || {}, data.videos || []);
   renderNicheSelect(data.niches || []);
+  renderAnalysisVideoOptions(data.videos || []);
+  renderAnalysisSummary(data.candidate_analysis || {}, data.job || {});
   els.satisfyingCount.textContent = `${number(data.stats?.satisfying_videos)} videos`;
 }
 
 async function refresh() {
   const response = await fetch("/api/dashboard");
-  render(await response.json());
+  const data = await response.json();
+  render(data);
+  await refreshAnalysisResult(data.candidate_analysis || {});
 }
 
 async function postJson(url, payload) {
@@ -275,6 +400,28 @@ async function submitSatisfying(event) {
   switchTab("downloads");
 }
 
+async function submitAnalysis(event) {
+  event.preventDefault();
+  const videoPath = els.analysisVideoPath.value.trim() || els.analysisVideoSelect.value;
+  els.analysisError.classList.add("hidden");
+  try {
+    await postJson("/api/analysis-jobs", {
+      videoPath,
+      durations: els.analysisDurations.value.trim(),
+      step: Number(els.analysisStep.value || 3),
+      silenceThresholdDb: Number(els.analysisSilenceThreshold.value || -35),
+      model: els.analysisModel.value,
+      language: "fr",
+      device: els.analysisDevice.value,
+      computeType: els.analysisComputeType.value,
+    });
+    loadedAnalysisKey = null;
+  } catch (error) {
+    els.analysisError.textContent = error.message || "Analyse impossible.";
+    els.analysisError.classList.remove("hidden");
+  }
+}
+
 async function stopJob() {
   try {
     await postJson("/api/jobs/stop", {});
@@ -306,6 +453,10 @@ els.stopBtn.addEventListener("click", stopJob);
 els.autoEnabled.addEventListener("change", saveAutomation);
 els.youtubeForm.addEventListener("submit", submitYoutube);
 els.satisfyingForm.addEventListener("submit", submitSatisfying);
+els.analysisForm.addEventListener("submit", submitAnalysis);
+els.analysisVideoSelect.addEventListener("change", () => {
+  if (els.analysisVideoSelect.value) els.analysisVideoPath.value = "";
+});
 els.disconnectTikTokBtn.addEventListener("click", disconnectTikTok);
 els.cleanupFailedBtn.addEventListener("click", cleanupFailed);
 els.folderButtons.forEach((button) => {

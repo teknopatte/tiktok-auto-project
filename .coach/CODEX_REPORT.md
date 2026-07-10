@@ -892,3 +892,47 @@ la nouvelle section d'analyse objective.
 **SÉCURITÉ VÉRIFIÉE** — `.env` n'est pas suivi et reste ignoré. `.state/`,
 `.cache/`, `downloads/` et les modèles locaux n'ont pas été publiés. La mutation
 runtime locale de `coach_system/state.json` n'a pas été ajoutée aux commits.
+
+---
+
+## 17. Intégration du moteur dans le dashboard local — 2026-07-10
+
+### Résumé
+
+**FAIT VÉRIFIÉ** — Le dashboard local possède maintenant un onglet `Analyser`.
+Il permet de choisir une source téléchargée ou un chemin local, de régler durées,
+pas, seuil FFmpeg, modèle, matériel et précision, puis de lancer
+`src.candidate_analysis` comme job local. Aucune option de téléchargement ou de
+publication TikTok n'est ajoutée à cette commande.
+
+Le résultat complet est stocké sous `.state/candidate_analysis/latest.json`.
+`/api/dashboard` n'en expose qu'un résumé et `/api/analysis/latest` fournit une
+page bornée à 200 candidats. L'interface affiche les 100 premiers afin de ne pas
+recharger des milliers de fenêtres toutes les trois secondes.
+
+### Fichiers modifiés
+
+- `src/control_app.py` : validation des paramètres, commande locale, job analyse,
+  résumé, pagination et routes API ;
+- `web/index.html`, `web/app.js`, `web/styles.css` : onglet, formulaire, état et
+  tableau responsive des six métriques ;
+- `tests/test_control_app.py` : cinq tests backend supplémentaires ;
+- `data/features.json` : capacité d'analyse marquée active, sélection automatique
+  toujours distincte et planifiée ;
+- `README.md` et `.coach/CODEX_REPORT.md` : documentation.
+
+### Résultats
+
+- tests ciblés dashboard : `14` réussis, `0` échec, `0.020 s` ;
+- suite complète : `86` réussis, `0` échec, `0.605 s` ;
+- `node --check web/app.js`, parsing HTML, `compileall src` et
+  `git diff --check` : succès ;
+- intégration HTTP réelle sur port isolé : dashboard `200`, job `completed`,
+  return code `0`, source `analysis`, aucun argument TikTok ;
+- vidéo locale 5 s : `3` candidats, endpoint paginé `2/3`, `has_more=true`,
+  résumé dashboard disponible avec `candidate_count=3`.
+
+**LIMITATION** — L'interface affiche une page de 100 candidats sans pagination
+interactive pour le moment. Elle ne classe pas les candidats et ne calcule aucun
+score. Le navigateur automatisé n'était pas disponible dans la session ; le HTML,
+le JavaScript, les API et le flux réel ont été validés sans capture visuelle.

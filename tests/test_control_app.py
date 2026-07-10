@@ -1,18 +1,88 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.control_app import (
     DEFAULT_LOOP_PAYLOAD,
+    analysis_summary,
+    build_analysis_command,
     build_download_command,
     build_satisfying_command,
     folder_target,
+    load_analysis_page,
+    parse_analysis_durations,
     safe_int,
     summarize_dashboard,
 )
 
 
 class ControlAppTests(unittest.TestCase):
+    def test_parse_analysis_durations_validates_bounds(self):
+        self.assertEqual(parse_analysis_durations("60,75,90"), (60.0, 75.0, 90.0))
+        with self.assertRaises(ValueError):
+            parse_analysis_durations("")
+        with self.assertRaises(ValueError):
+            parse_analysis_durations("0,60")
+
+    def test_build_analysis_command_uses_local_module_and_never_publishes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            video = Path(directory) / "source.mp4"
+            video.write_bytes(b"fixture")
+            command = build_analysis_command(
+                {
+                    "videoPath": str(video),
+                    "durations": "60,90",
+                    "step": 4,
+                    "silenceThresholdDb": -32,
+                    "model": "tiny",
+                    "device": "cpu",
+                    "computeType": "int8",
+                }
+            )
+        self.assertEqual(command[1:4], ["-m", "src.candidate_analysis", "analyze"])
+        self.assertIn(str(video.resolve()), command)
+        self.assertIn("60,90", command)
+        self.assertIn("-32", command)
+        self.assertNotIn("--auto-publish-tiktok", command)
+
+    def test_build_analysis_command_rejects_missing_or_non_video_file(self):
+        with self.assertRaisesRegex(ValueError, "introuvable"):
+            build_analysis_command({"videoPath": "missing.mp4"})
+        with tempfile.TemporaryDirectory() as directory:
+            document = Path(directory) / "notes.txt"
+            document.write_text("not a video", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Format video"):
+                build_analysis_command({"videoPath": str(document)})
+
+    def test_analysis_result_is_summarized_and_paginated(self):
+        payload = {
+            "source_video": "video.mp4",
+            "analysis_version": "1.0",
+            "config": {"step_seconds": 3},
+            "global_analysis": {"duration_seconds": 180},
+            "candidates": [{"candidate_id": f"clip_{index:04d}"} for index in range(5)],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "latest.json"
+            output.write_text(json.dumps(payload), encoding="utf-8")
+            with patch("src.control_app.ANALYSIS_OUTPUT_FILE", output):
+                summary = analysis_summary()
+                page = load_analysis_page(offset=2, limit=2)
+        self.assertTrue(summary["available"])
+        self.assertEqual(summary["candidate_count"], 5)
+        self.assertEqual([item["candidate_id"] for item in page["candidates"]], ["clip_0002", "clip_0003"])
+        self.assertEqual(page["pagination"], {"offset": 2, "limit": 2, "total": 5, "has_more": True})
+
+    def test_analysis_result_handles_missing_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "missing.json"
+            with patch("src.control_app.ANALYSIS_OUTPUT_FILE", output):
+                self.assertEqual(analysis_summary(), {"available": False, "candidate_count": 0})
+                self.assertFalse(load_analysis_page()["ok"])
+
     def test_safe_int_clamps_values(self):
         self.assertEqual(safe_int("2", 10, minimum=5, maximum=20), 5)
         self.assertEqual(safe_int("30", 10, minimum=5, maximum=20), 20)
